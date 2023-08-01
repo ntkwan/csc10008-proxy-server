@@ -1,4 +1,5 @@
 from socket import *
+import time
 import sys
 import os
 import re
@@ -16,10 +17,10 @@ def handle_client(client_socket):
         client_socket.send(response.encode())
         client_socket.close()
         return
-
+    
     server_respone = get_server_respone(host_name, request)
     client_socket.send(server_respone)
-    # cache_data(host_name, server_respone)
+
     try:
         image_urls = extract_image_url(server_respone.decode())
         cache_image(image_urls, host_name)
@@ -52,14 +53,22 @@ def get_server_respone(host_name, request):
     headers = server_respone[:header_end]
     chunked_encoding = "transfer-encoding: chunked" in headers.decode().lower()
     
-    if not chunked_encoding:
-        content_length = get_content_length(headers)
+    content_length = get_content_length(headers)
+    if not chunked_encoding and content_length > 0:
         if len(server_respone) < header_end + 4 + content_length:
             length = content_length - (len(server_respone) - header_end - 4)
             while len(server_respone) < header_end + content_length + 4:
                 server_respone += server_socket.recv(length)
     else:
-        server_respone += server_socket.recv(10000)
+        while True:
+            data_chunk = server_socket.recv(1024)
+            time.sleep(2.0)
+            if len(data_chunk) == 1024:
+                server_respone += data_chunk
+            else:
+                server_respone += data_chunk
+                break
+    
     server_socket.close()
     return server_respone
 
@@ -105,13 +114,6 @@ def cache_image(image_urls, host_name):
         with open(file_name, "wb") as file:
             file.write(image_data)
         
-
-def cache_data(host_name, data):
-    file_path = "cache/" + host_name
-    with open(file_path, "wb") as file:
-        file.write(data)
-
-
 tcpSerSock = socket(AF_INET, SOCK_STREAM)
 tcpSerSock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
 tcpSerSock.bind((sys.argv[1], 8888))
