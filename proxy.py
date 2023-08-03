@@ -26,10 +26,8 @@ def is_image_request(url):
 def handle_client(client_socket):
     try:
         request = client_socket.recv(4096)
-        print(request)
         method, url, host_name = get_server_info(request)
-        
-        print(url)
+    
         if method == None:
             client_socket.close()
             return
@@ -40,7 +38,7 @@ def handle_client(client_socket):
             client_socket.close()
             return
         
-        print(host_name)
+        print(url)
         if is_image_request(url):
             _, path = os.path.split(url)
             file_name = "cache/" + host_name.replace(".", "_") + "-" + path
@@ -147,8 +145,8 @@ def get_content_length(headers):
     return 0
 
 def cache_image(host_name, image_data, url):
-    _, path = os.path.split(url)
-    file_name = "cache/" + host_name.replace(".", "_") + "-" + path
+    path = url.split(host_name)[1]
+    file_name = "cache/" + host_name.replace(".", "_") + path.replace("/","-")
     with open(file_name, "wb") as file:
         file.write(image_data)
     images_cache_time[file_name[6:]] = time.time()
@@ -159,16 +157,20 @@ def cache_clean():
         current_time = time.time()
         for file in os.listdir("./cache"):
             if current_time - images_cache_time[file] > CACHE_TIME:
-                print('recaching')
+                print("deleted", file)
                 os.remove(os.path.join("cache/", file))
                 recache_image(file)
 
 def recache_image(file):
     host_name = file.split('-')[0].replace("_",".")
-    path = '/' + file.split('-')[1]
-    request = f"GET {path} HTTP/1.1\r\nHost: {host_name}\r\n\r\n"
+    paths = file.split('-')[1:]
+    url = "http://" + host_name
+    for path in paths:
+        url += "/" + path
+ 
+    request = f"GET {url} HTTP/1.1\r\nHost: {host_name}\r\n\r\n"
     image_data, _ = get_image_data_respone(host_name,request.encode())
-    cache_image(host_name, image_data, path)
+    cache_image(host_name, image_data, url)
     
 def get_config():
     with open("config", "r") as file:
@@ -196,7 +198,10 @@ def main():
 
     if not os.path.exists("./cache"):
         os.makedirs("./cache")
-
+    else:
+        for file in os.listdir("./cache"):
+            os.remove(os.path.join("./cache",file))
+            
     cache_clean_thread = threading.Thread(target=cache_clean, daemon=True)
     cache_clean_thread.start()
     
