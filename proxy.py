@@ -4,8 +4,6 @@ import datetime
 import threading
 import sys
 import os
-import re
-import gzip
 
 if len(sys.argv) <= 1:
     print('Usage : "python ProxyServer.py server_ip"\n[server_ip : It is the IP Address Of Proxy Server]')
@@ -25,13 +23,11 @@ def handle_client(client_socket):
             client_socket.close()
             return
         
-        print(host_name)
         print(url)
         if is_image_request(url):
             _, path = os.path.split(url)
             file_name = "cache/" + host_name.replace(".", "_") + "-" + path
             if os.path.exists(file_name):
-                print("exist")
                 response = "HTTP/1.1 200 OK\r\n\r\n"
                 with open(file_name, "rb") as file:
                     image_data = file.read()
@@ -41,10 +37,8 @@ def handle_client(client_socket):
                 return
             else:
                 image_data, server_respone = get_image_data_respone(host_name, request)
-                if server_respone != None:
+                if image_data != b'':
                     cache_image(host_name, image_data, url)
-                else:
-                    server_respone = b"HTTP/1.1 403 Forbidden\r\n\r\n<html><body><h1>403 Forbidden</h1><h2>Cache time out. Refresh your host website</h2></body></html>"
                 client_socket.sendall(server_respone)
                 client_socket.close()
                 return
@@ -54,7 +48,6 @@ def handle_client(client_socket):
         client_socket.close()
     except OSError:
         client_socket.close()
-        pass
 
 def get_server_info(request):
     try:
@@ -94,29 +87,25 @@ def get_server_respone(host_name, request):
     header_end = server_respone.find(b"\r\n\r\n")
     headers = server_respone[:header_end]
     
-    if header_end + 4 == len(server_respone):
-        server_socket.close()
-        return None
-        
-    chunked_encoding = "transfer-encoding: chunked" in headers.decode().lower()
-    
-    content_length = get_content_length(headers)
-    if not chunked_encoding and content_length > 0:
-        if len(server_respone) < header_end + 4 + content_length:
-            length = content_length - (len(server_respone) - header_end - 4)
-            while len(server_respone) < header_end + content_length + 4:
-                server_respone += server_socket.recv(length)
-    else:
-        end_check = b'0'
-        chunked_part = server_respone.split(b"\r\n\r\n")[1]
-        chunks = chunked_part.split(b"\r\n")
-        if end_check not in chunks:
-            while True:
-                data_chunk = server_socket.recv(1024)
-                server_respone += data_chunk
-                data_chunks = data_chunk.split(b"\r\n")
-                if end_check in data_chunks:
-                    break
+    if header_end + 4 != len(server_respone):    
+        chunked_encoding = "transfer-encoding: chunked" in headers.decode().lower()
+        content_length = get_content_length(headers)
+        if not chunked_encoding and content_length > 0:
+            if len(server_respone) < header_end + 4 + content_length:
+                length = content_length - (len(server_respone) - header_end - 4)
+                while len(server_respone) < header_end + content_length + 4:
+                    server_respone += server_socket.recv(length)
+        else:
+            end_check = b'0'
+            chunked_part = server_respone.split(b"\r\n\r\n")[1]
+            chunks = chunked_part.split(b"\r\n")
+            if end_check not in chunks:
+                while True:
+                    data_chunk = server_socket.recv(1024)
+                    server_respone += data_chunk
+                    data_chunks = data_chunk.split(b"\r\n")
+                    if end_check in data_chunks:
+                        break
     server_socket.close()
     return server_respone
 
@@ -130,8 +119,7 @@ def get_content_length(headers):
 
 def get_image_data_respone(host_name, request):
     server_respone = get_server_respone(host_name, request)
-    if server_respone != None:
-        image_data = server_respone.split(b"\r\n\r\n")[1]
+    image_data = server_respone.split(b"\r\n\r\n")[1]
     return image_data, server_respone
 
 def cache_image(host_name, image_data, url):
@@ -140,7 +128,6 @@ def cache_image(host_name, image_data, url):
     with open(file_name, "wb") as file:
         file.write(image_data)
     images_cache_time[file_name[6:]] = time.time()
-    print(images_cache_time)
         
 def cache_clean():
     while True:
@@ -149,8 +136,15 @@ def cache_clean():
         for file in os.listdir("./cache"):
             if current_time - images_cache_time[file] > CACHE_TIME:
                 os.remove(os.path.join("cache/", file))
-                    
+                recache_image(file)
 
+def recache_image(file):
+    host_name = file.split('-')[0].replace("_",".")
+    path = '/' + file.split('-')[1]
+    request = f"GET {path} HTTP/1.1\r\nHost: {host_name}\r\n\r\n"
+    image_data, _ = get_image_data_respone(host_name,request.encode())
+    cache_image(host_name, image_data, path)
+    
 def get_config():
     with open("config", "r") as file:
         for line in file:
