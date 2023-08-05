@@ -19,8 +19,7 @@ def is_whitelisted(host_name):
 
 def is_image_request(url):
     image_extensions = [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico"]
-    _, ext = os.path.splitext(url)
-    return any(ext == ex for ex in image_extensions)
+    return any(url.endswith(ex) for ex in image_extensions)
 
 def get_server_info(request):
     try:
@@ -33,8 +32,7 @@ def get_server_info(request):
         return None, None, None
 
 def error_response():
-    response = b"HTTP/1.1 403 Forbidden\r\n\r\n" + open('./forbidden_page.html', 'rb').read()
-    return response
+    return (b"HTTP/1.1 403 Forbidden\r\n\r\n" + open('./forbidden_page.html', 'rb').read())
 
 def handle_client(client_socket):
     try:
@@ -42,45 +40,36 @@ def handle_client(client_socket):
         method, url, host_name = get_server_info(request) # Get the request information
     
         # If the request is from invalid connection, close the connection
-        print('Try to connect to',host_name)
+        print('Try to connect to', url)
         if method == None:
-            print('Failed to connect!')
-            client_socket.close()
-            return
+            return (print('Failed to connect!'), client_socket.close())
         
         # If the request is not in access time or not in whitelist or not [GET, POS, HEAD] request, return 403 Forbidden
         if not is_in_access_time() or not is_whitelisted(host_name) or method not in ['GET', 'POST', 'HEAD']:
-            print('Error: 403 Forbidden')
             client_socket.sendall(error_response())
-            client_socket.close()
-            return
+            return (print('Error: 403 Forbidden'), client_socket.close())
         
-        print(url)
-
         # If the request is image request, check the cache
         if is_image_request(url):
             _, path = os.path.split(url)
-            file_name = "cache/" + host_name.replace(".", "_") + "-" + path
+            file_name = "cache/" + host_name.replace(".", "_") + '-' + path  
+            response = b"HTTP/1.1 200 OK\r\n Cache-Control: no-store\r\n\r\n" 
+            client_socket.sendall(response)
+            
             # If the image is in cache, return the image
-            if os.path.exists(file_name):
-                response = "HTTP/1.1 200 OK\r\n\r\n"
-                with open(file_name, "rb") as file:
-                    image_data = file.read()
-                print('Image:', file_name, 'found in cache!')
-                client_socket.sendall(response.encode())
+            if os.path.isfile(file_name):
+                image_data = open(file_name, 'rb').read()
                 client_socket.sendall(image_data)
-                client_socket.close()
-                return
-            else:
-                # If the image is not in cache, request the image from server and cache it
-                image_data, server_response = get_image_data_respone(host_name, request)
+                print('Image:', file_name, 'found in cache!')
+            else: # If the image is not in cache, request the image from server and cache it
+                image_data = get_image_data_respone(host_name, request)
                 if image_data != b'':
                     cache_image(host_name, image_data, url)
-                    print('Image:', file_name, 'cached!')
-                client_socket.sendall(server_response)
-                client_socket.close()
-                return
-        
+                    client_socket.sendall(image_data)
+                    
+            return (client_socket.close())
+            
+
         # If the request is not image request, get the response from server and return it to client
         server_response = get_server_respone(host_name, request)
         client_socket.sendall(server_response)
@@ -122,10 +111,11 @@ def get_server_respone(host_name, request):
     
     # If the response is error code, return 403 Forbidden
     if get_status(server_respone) in error_codes:
+        print('Error: 403 Forbidden')
         return error_response()
     
     # If the response is "connection: close", get the response until the end of the response (the web server will closed eventually)
-    if (get_connection_close(headers)):
+    if get_connection_close(headers):
         while True:
             data_chunk = server_socket.recv(1024)
             if (data_chunk):
@@ -166,32 +156,38 @@ def get_image_data_respone(host_name, request):
     
     # If the image response is not error code, return the image data
     image_data = server_respone.split(b"\r\n\r\n")[1]
-    return image_data, server_respone
+    return image_data
 
 def cache_image(host_name, image_data, url):
-    path = url.split(host_name)[1]
-    file_name = "cache/" + host_name.replace(".", "_") + path.replace("/","-")
+    _, path = os.path.split(url)
+    file_name = "cache/" + host_name.replace(".", "_") + '-' + path
     # Save the image data to cache by the following file name in folder cache
-    with open(file_name, "wb") as file:
-        file.write(image_data)
+    open(file_name, "wb").write(image_data)
     # Update the cache time of the image
     images_cache_time[file_name[6:]] = time.time()
+    # Announce the image is cached
+    print('Image:', file_name, 'cached!')
+
         
 def cache_clean():
     while True:
         # While multiple threads are running, sleep for CACHE_TIME seconds
         time.sleep(CACHE_TIME)
+        print("Cache cleaning...")
         current_time = time.time()
         # Delete the image in cache folder if the image is not used for CACHE_TIME seconds
         for file in os.listdir("./cache"):
             if current_time - images_cache_time[file] > CACHE_TIME:
-                print("deleted", file)
+                print("Deleted", file)
                 os.remove(os.path.join("cache/", file))
                 recache_image(file) # Recache the image after deleting the image in cache folder by requesting the image to the web server again
+        print("="*50)
 
 def recache_image(file):
     host_name = file.split('-')[0].replace("_",".")
     paths = file.split('-')[1:]
+    
+    # Create the url to get the image
     url = "http://" + host_name
     for path in paths:
         url += "/" + path
@@ -254,7 +250,7 @@ def main():
             print('Ready to serve...')
             tcpCliSock, addr = tcpSerSock.accept() 
             print('Received a connection from:', addr)
-            # Start a thread to handle the request from web client
+            # Start a thread to handle mutiple requests from web client
             handle_client(tcpCliSock)
             client_thread = threading.Thread(target=handle_client, args=(tcpCliSock,))
             client_thread.start()   
