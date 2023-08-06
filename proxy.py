@@ -12,9 +12,8 @@ def is_in_access_time():
     return access_start <= now <= access_end
 
 def is_whitelisted(host_name):
-    line = open("config", "r").readlines()[1]
-    white_list = line.split('=')[1].split(', ')
-    white_list[-1] = white_list[-1][:-1]
+    with open("config", "r") as file: line = file.readlines()[1]
+    white_list = line.split('=')[1].strip().split(', ')
     return any(site in host_name for site in white_list)
 
 def is_image_request(url):
@@ -32,11 +31,13 @@ def get_server_info(request):
         return None, None, None
 
 def error_response():
-    return (b"HTTP/1.1 403 Forbidden\r\n\r\n" + open('./forbidden_page.html', 'rb').read())
+    with open('./forbidden_page.html', 'rb') as file: response = file.read()
+    return b"HTTP/1.1 403 Forbidden\r\n\r\n" + response
 
 def handle_client(client_socket):
     try:
         request = client_socket.recv(4096) # Get the header of the request
+        print(request.split(b"\r\n\r\n")[0].decode())
         method, url, host_name = get_server_info(request) # Get the request information
     
         # If the request is from invalid connection, close the connection
@@ -51,18 +52,18 @@ def handle_client(client_socket):
         
         # If the request is image request, check the cache
         if is_image_request(url):
-            _, path = os.path.split(url)
-            file_name = "cache/" + host_name.replace(".", "_") + '-' + path  
-            response = b"HTTP/1.1 200 OK\r\n Cache-Control: no-store\r\n\r\n" 
+            path = url.split(host_name)[1]
+            file_name = "cache/" + host_name.replace(".", "_") + path.replace("/","-")
+            response = b"HTTP/1.1 200 OK\r\nCache-Control: no-store\r\n\r\n" 
             client_socket.sendall(response)
             
             # If the image is in cache, return the image
             if os.path.isfile(file_name):
-                image_data = open(file_name, 'rb').read()
+                with open(file_name, 'rb')as file: image_data =file.read()
                 client_socket.sendall(image_data)
                 print('Image:', file_name, 'found in cache!')
             else: # If the image is not in cache, request the image from server and cache it
-                image_data = get_image_data_respone(host_name, request)
+                image_data = get_image_data_response(host_name, request)
                 if image_data != b'':
                     cache_image(host_name, image_data, url)
                     client_socket.sendall(image_data)
@@ -71,46 +72,48 @@ def handle_client(client_socket):
             
 
         # If the request is not image request, get the response from server and return it to client
-        server_response = get_server_respone(host_name, request)
+        server_response = get_server_response(host_name, request)
         client_socket.sendall(server_response)
         client_socket.close()
     except OSError: # If the request is invalid or file not found, close the connection
         client_socket.close()
 
 
-def get_status(server_respone):
-    buffer = server_respone.split(b'\r\n')[0]
+def get_status(server_response):
+    buffer = server_response.split(b'\r\n')[0]
     status = buffer.split(b' ')[1]
     return status
 
-def get_connection_close(server_respone):
-    connection = "connection: close" in server_respone.decode().lower()
+def get_connection_close(server_response):
+    connection = "connection: close" in server_response.decode().lower()
     return connection
 
 def get_content_length(headers):
     lines = headers.split(b"\r\n")
     for line in lines:
-        if line.startswith(b"Content-Length:") or line.startswith(b"content-length"):
+        if line.lower().startswith(b"content-length"):
             length = line.split(b":")[1].strip()
             return int(length)
     return 0
 
-def get_server_respone(host_name, request):
+def get_server_response(host_name, request):
     # Connect to web server and send the request
     server_socket = socket(AF_INET, SOCK_STREAM)
     server_socket.connect((host_name, 80))
     server_socket.sendall(request)
     
     # Get the response from web server
-    server_respone = server_socket.recv(1024)
+    server_response = server_socket.recv(1024)
 
+    print("\n\n")
+    print(server_response.split(b"\r\n\r\n")[0].decode())
     # Get the header of the request
     chunked_encoding = False
-    header_end = server_respone.find(b"\r\n\r\n")
-    headers = server_respone[:header_end]
+    header_end = server_response.find(b"\r\n\r\n")
+    headers = server_response[:header_end]
     
     # If the response is error code, return 403 Forbidden
-    if get_status(server_respone) in error_codes:
+    if get_status(server_response) in error_codes:
         print('Error: 403 Forbidden')
         return error_response()
     
@@ -119,55 +122,54 @@ def get_server_respone(host_name, request):
         while True:
             data_chunk = server_socket.recv(1024)
             if (data_chunk):
-                server_respone += data_chunk
+                server_response += data_chunk
             else:
-                return server_respone
+                return server_response
 
     # If the response is not "connection: close" and the body part is not empty, get the response by following the content length or chunked encoding
-    if header_end + 4 != len(server_respone):    
+    if header_end + 4 != len(server_response):    
         chunked_encoding = "transfer-encoding: chunked" in headers.decode().lower()
         content_length = get_content_length(headers)
         # If the response is not chunked encoding, get the response by content length
         if not chunked_encoding and content_length > 0:
-            if len(server_respone) < header_end + 4 + content_length:
-                length = content_length - (len(server_respone) - header_end - 4)
-                while len(server_respone) < header_end + content_length + 4:
-                    server_respone += server_socket.recv(length)
+            if len(server_response) < header_end + 4 + content_length:
+                length = content_length - (len(server_response) - header_end - 4)
+                while len(server_response) < header_end + content_length + 4:
+                    server_response += server_socket.recv(length)
         else:  # If the response is chunked encoding, get the response until meet '0' in the body part
             end_check = b'0'
-            chunked_part = server_respone.split(b"\r\n\r\n")[1]
+            chunked_part = server_response.split(b"\r\n\r\n")[1]
             chunks = chunked_part.split(b"\r\n")
             if end_check not in chunks:
                 while True:
                     data_chunk = server_socket.recv(1024)
-                    server_respone += data_chunk
+                    server_response += data_chunk
                     data_chunks = data_chunk.split(b"\r\n")
                     if end_check in data_chunks:
                         break
     
     server_socket.close()
-    return server_respone
+    return server_response
 
-def get_image_data_respone(host_name, request):
-    server_respone = get_server_respone(host_name, request)
+def get_image_data_response(host_name, request):
+    server_response = get_server_response(host_name, request)
     # If the image response is error code, return empty image data
-    if get_status(server_respone) in error_codes:
-        return b'', server_respone
+    if get_status(server_response) in error_codes:
+        return b''
     
     # If the image response is not error code, return the image data
-    image_data = server_respone.split(b"\r\n\r\n")[1]
+    image_data = server_response.split(b"\r\n\r\n")[1]
     return image_data
 
 def cache_image(host_name, image_data, url):
-    _, path = os.path.split(url)
-    file_name = "cache/" + host_name.replace(".", "_") + '-' + path
+    path = url.split(host_name)[1]
+    file_name = "cache/" + host_name.replace(".", "_") + path.replace("/","-")
     # Save the image data to cache by the following file name in folder cache
-    open(file_name, "wb").write(image_data)
+    with open(file_name, "wb") as file: file.write(image_data)
     # Update the cache time of the image
     images_cache_time[file_name[6:]] = time.time()
     # Announce the image is cached
     print('Image:', file_name, 'cached!')
-
         
 def cache_clean():
     while True:
@@ -195,7 +197,7 @@ def recache_image(file):
     # Create the request to get the image
     request = f"GET {url} HTTP/1.1\r\nHost: {host_name}\r\n\r\n"
     # Send the request to web server and get the image data
-    image_data, _ = get_image_data_respone(host_name,request.encode())
+    image_data, _ = get_image_data_response(host_name,request.encode())
     # Cache the image data to cache folder
     cache_image(host_name, image_data, url)
     
