@@ -33,7 +33,7 @@ def get_server_info(request):
 def error_response():
     with open('./forbidden_page.html', 'rb') as file: response = file.read()
     return b"HTTP/1.1 403 Forbidden\r\n\r\n" + response
-
+import gzip
 def handle_client(client_socket):
     try:
         request = client_socket.recv(4096) # Get the header of the request
@@ -107,15 +107,23 @@ def get_server_response(host_name, request):
 
     print("\n\n")
     print(server_response.split(b"\r\n\r\n")[0].decode())
+    # If the response is error code, return 403 Forbidden
+    status = get_status(server_response)
+    if status in error_codes:
+        print('Error: 403 Forbidden')
+        return error_response()
+    elif status == b"100":
+        server_response = server_socket.recv(1024)
+
     # Get the header of the request
     chunked_encoding = False
     header_end = server_response.find(b"\r\n\r\n")
     headers = server_response[:header_end]
     
-    # If the response is error code, return 403 Forbidden
-    if get_status(server_response) in error_codes:
-        print('Error: 403 Forbidden')
-        return error_response()
+    # If the request is HEAD, return
+    if b"HEAD" in request:
+        server_socket.close()
+        return server_response
     
     # If the response is "connection: close", get the response until the end of the response (the web server will closed eventually)
     if get_connection_close(headers):
@@ -124,30 +132,38 @@ def get_server_response(host_name, request):
             if (data_chunk):
                 server_response += data_chunk
             else:
+                server_socket.close()
                 return server_response
 
-    # If the response is not "connection: close" and the body part is not empty, get the response by following the content length or chunked encoding
-    if header_end + 4 != len(server_response):    
-        chunked_encoding = "transfer-encoding: chunked" in headers.decode().lower()
-        content_length = get_content_length(headers)
-        # If the response is not chunked encoding, get the response by content length
-        if not chunked_encoding and content_length > 0:
-            if len(server_response) < header_end + 4 + content_length:
-                length = content_length - (len(server_response) - header_end - 4)
-                while len(server_response) < header_end + content_length + 4:
-                    server_response += server_socket.recv(length)
-        else:  # If the response is chunked encoding, get the response until meet '0' in the body part
-            end_check = b'0'
-            chunked_part = server_response.split(b"\r\n\r\n")[1]
-            chunks = chunked_part.split(b"\r\n")
-            if end_check not in chunks:
-                while True:
-                    data_chunk = server_socket.recv(1024)
-                    server_response += data_chunk
-                    data_chunks = data_chunk.split(b"\r\n")
-                    if end_check in data_chunks:
-                        break
+    # If the response is not "connection: close" and the body part is not empty, get the response by following the content length or chunked encoding 
+    if server_response[header_end+4:] == b"":
+        data = server_socket.recv(1024)
+        if data == b"":
+            server_socket.close()
+            return server_response
+        else:
+            server_response += data
     
+    chunked_encoding = "transfer-encoding: chunked" in headers.decode().lower()
+    content_length = get_content_length(headers)
+    # If the response is not chunked encoding, get the response by content length
+    if not chunked_encoding and content_length > 0:
+        if len(server_response) < header_end + 4 + content_length:
+            length = content_length - (len(server_response) - header_end - 4)
+            while len(server_response) < header_end + content_length + 4:
+                server_response += server_socket.recv(length)
+    else:  # If the response is chunked encoding, get the response until meet '0' in the body part
+        end_check = b'0'
+        chunked_part = server_response.split(b"\r\n\r\n")[1]
+        chunks = chunked_part.split(b"\r\n")
+        if end_check not in chunks:
+            while True:
+                data_chunk = server_socket.recv(1024)
+                server_response += data_chunk
+                data_chunks = data_chunk.split(b"\r\n")
+                if end_check in data_chunks:
+                    break
+            
     server_socket.close()
     return server_response
 
@@ -218,7 +234,7 @@ def get_config():
 # Global variables
 CACHE_TIME, WHITE_LIST, TIME_LIMIT = get_config()
 WEB_CLIENT = 5
-error_codes = [b'405', b'404', b'403', b'401', b'400', b'408', b'500', b'502', b'503', b'100']
+error_codes = [b'405', b'404', b'403', b'401', b'400', b'408', b'500', b'502', b'503']
 images_cache_time = {}
 
 def main():     
