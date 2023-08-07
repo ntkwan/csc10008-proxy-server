@@ -94,6 +94,14 @@ def get_content_length(headers):
             return int(length)
     return 0
 
+def get_etag(headers):
+    lines = headers.split(b"\r\n")
+    for line in lines:
+        if b"if-none-match" in line.lower() or b"etag" in line.lower():
+            etag = line.split(b":")[1].strip()
+            return etag
+    return b""
+
 def get_server_response(host_name, request):
     # Connect to web server and send the request
     server_socket = socket(AF_INET, SOCK_STREAM)
@@ -102,7 +110,6 @@ def get_server_response(host_name, request):
     
     # Get the response from web server
     server_response = server_socket.recv(1024)
-
     # If the response is error code, return 403 Forbidden
     status = get_status(server_response)
     if status in error_codes:
@@ -132,35 +139,28 @@ def get_server_response(host_name, request):
             else:
                 server_socket.close()
                 return server_response
-    
-    # If the body part is not empty, get the response by following the content length or chunked encoding 
-    if server_response[header_end+4:] == b"":
-        data = server_socket.recv(1024)
-        if data == b"":
-            server_socket.close()
-            return server_response
-        else:
-            server_response += data
 
-    chunked_encoding = "transfer-encoding: chunked" in headers.decode().lower()
-    content_length = get_content_length(headers)
-    # If the response is not chunked encoding, get the response by content length
-    if not chunked_encoding and content_length > 0:
-        if len(server_response) < header_end + 4 + content_length:
-            length = content_length - (len(server_response) - header_end - 4)
-            while len(server_response) < header_end + content_length + 4:
-                server_response += server_socket.recv(length)
-    else:  # If the response is chunked encoding, get the response until meet '0' in the body part
-        end_check = b'0'
-        chunked_part = server_response.split(b"\r\n\r\n")[1]
-        chunks = chunked_part.split(b"\r\n")
-        if end_check not in chunks:
-            while True:
-                data_chunk = server_socket.recv(1024)
-                server_response += data_chunk
-                data_chunks = data_chunk.split(b"\r\n")
-                if end_check in data_chunks:
-                    break
+    # If the response is not "connection: close" and the body part is not empty, get the response by following the content length or chunked encoding 
+    if get_etag(request) != get_etag(headers) or get_etag(request) == b"":
+        chunked_encoding = "transfer-encoding: chunked" in headers.decode().lower()
+        content_length = get_content_length(headers)
+        # If the response is not chunked encoding, get the response by content length
+        if not chunked_encoding and content_length > 0:
+            if len(server_response) < header_end + 4 + content_length:
+                length = content_length - (len(server_response) - header_end - 4)
+                while len(server_response) < header_end + content_length + 4:
+                    server_response += server_socket.recv(length)
+        else:  # If the response is chunked encoding, get the response until meet '0' in the body part
+            end_check = b'0'
+            chunked_part = server_response.split(b"\r\n\r\n")[1]
+            chunks = chunked_part.split(b"\r\n")
+            if end_check not in chunks:
+                while True:
+                    data_chunk = server_socket.recv(1024)
+                    server_response += data_chunk
+                    data_chunks = data_chunk.split(b"\r\n")
+                    if end_check in data_chunks:
+                        break
             
     server_socket.close()
     return server_response
