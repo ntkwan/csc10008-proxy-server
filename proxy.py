@@ -12,7 +12,7 @@ def is_in_access_time():
     return access_start <= now <= access_end
 
 def is_whitelisted(host_name):
-    with open("config", "r") as file: line = file.readlines()[1]
+    line = open("config", "r").readlines()[1]
     white_list = line.split('=')[1].strip().split(', ')
     return any(site in host_name for site in white_list)
 
@@ -31,13 +31,11 @@ def get_server_info(request):
         return None, None, None
 
 def error_response():
-    with open('./forbidden_page.html', 'rb') as file: response = file.read()
-    return b"HTTP/1.1 403 Forbidden\r\n\r\n" + response
-import gzip
+    return b"HTTP/1.1 403 Forbidden\r\n\r\n" + open('./forbidden_page.html', 'rb').read();
+
 def handle_client(client_socket):
     try:
         request = client_socket.recv(4096) # Get the header of the request
-        print(request.split(b"\r\n\r\n")[0].decode())
         method, url, host_name = get_server_info(request) # Get the request information
     
         # If the request is from invalid connection, close the connection
@@ -59,7 +57,7 @@ def handle_client(client_socket):
             
             # If the image is in cache, return the image
             if os.path.isfile(file_name):
-                with open(file_name, 'rb')as file: image_data =file.read()
+                image_data = open(file_name, 'rb').read()
                 client_socket.sendall(image_data)
                 print('Image:', file_name, 'found in cache!')
             else: # If the image is not in cache, request the image from server and cache it
@@ -105,14 +103,12 @@ def get_server_response(host_name, request):
     # Get the response from web server
     server_response = server_socket.recv(1024)
 
-    print("\n\n")
-    print(server_response.split(b"\r\n\r\n")[0].decode())
     # If the response is error code, return 403 Forbidden
     status = get_status(server_response)
     if status in error_codes:
         print('Error: 403 Forbidden')
         return error_response()
-    elif status == b"100":
+    elif status == b"100": # If the response is 100 continue, get the next response
         server_response = server_socket.recv(1024)
 
     # Get the header of the request
@@ -120,11 +116,13 @@ def get_server_response(host_name, request):
     header_end = server_response.find(b"\r\n\r\n")
     headers = server_response[:header_end]
     
+    '''
     # If the request is HEAD, return
     if b"HEAD" in request:
         server_socket.close()
         return server_response
-    
+    '''
+
     # If the response is "connection: close", get the response until the end of the response (the web server will closed eventually)
     if get_connection_close(headers):
         while True:
@@ -134,8 +132,8 @@ def get_server_response(host_name, request):
             else:
                 server_socket.close()
                 return server_response
-
-    # If the response is not "connection: close" and the body part is not empty, get the response by following the content length or chunked encoding 
+    
+    # If the body part is not empty, get the response by following the content length or chunked encoding 
     if server_response[header_end+4:] == b"":
         data = server_socket.recv(1024)
         if data == b"":
@@ -143,7 +141,7 @@ def get_server_response(host_name, request):
             return server_response
         else:
             server_response += data
-    
+
     chunked_encoding = "transfer-encoding: chunked" in headers.decode().lower()
     content_length = get_content_length(headers)
     # If the response is not chunked encoding, get the response by content length
@@ -181,7 +179,7 @@ def cache_image(host_name, image_data, url):
     path = url.split(host_name)[1]
     file_name = "cache/" + host_name.replace(".", "_") + path.replace("/","-")
     # Save the image data to cache by the following file name in folder cache
-    with open(file_name, "wb") as file: file.write(image_data)
+    open(file_name, 'wb').write(image_data)
     # Update the cache time of the image
     images_cache_time[file_name[6:]] = time.time()
     # Announce the image is cached
