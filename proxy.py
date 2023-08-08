@@ -211,7 +211,7 @@ def recache_image(file):
     # Create the request to get the image
     request = f"GET {url} HTTP/1.1\r\nHost: {host_name}\r\n\r\n"
     # Send the request to web server and get the image data
-    image_data, _ = get_image_data_response(host_name,request.encode())
+    image_data = get_image_data_response(host_name,request.encode())
     # Cache the image data to cache folder
     cache_image(host_name, image_data, url)
     
