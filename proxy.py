@@ -112,10 +112,7 @@ def get_server_response(host_name, request):
     server_response = server_socket.recv(1024)
     # If the response is error code, return 403 Forbidden
     status = get_status(server_response)
-    if status in error_codes:
-        print('Error: 403 Forbidden')
-        return error_response()
-    elif status == b"100": # If the response is 100 continue, get the next response
+    if status == b"100": # If the response is 100 continue, get the next response
         server_response = server_socket.recv(1024)
 
     # Get the header of the request
@@ -123,18 +120,16 @@ def get_server_response(host_name, request):
     header_end = server_response.find(b"\r\n\r\n")
     headers = server_response[:header_end]
     
-    '''
     # If the request is HEAD, return
     if b"HEAD" in request:
         server_socket.close()
         return server_response
-    '''
 
     # If the response is "connection: close", get the response until the end of the response (the web server will closed eventually)
     if get_connection_close(headers):
         while True:
             data_chunk = server_socket.recv(1024)
-            if (data_chunk):
+            if data_chunk:
                 server_response += data_chunk
             else:
                 server_socket.close()
