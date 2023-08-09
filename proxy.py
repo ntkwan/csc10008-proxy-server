@@ -254,21 +254,23 @@ def main():
     cache_clean_thread = threading.Thread(target=cache_clean, daemon=True)
     cache_clean_thread.start()
     
-    # Main loop
+    # Main thread
     while True:
         try:
+            print("Active threads:", threading.active_count());
             # Start receiving data from the web client
             print('Ready to serve...')
             tcpCliSock, addr = tcpSerSock.accept() 
             print('Received a connection from:', addr)
             # Start a thread to handle mutiple requests from web client
-            handle_client(tcpCliSock)
-            client_thread = threading.Thread(target=handle_client, args=(tcpCliSock,))
+            client_thread = threading.Thread(target=handle_client, args=(tcpCliSock,), daemon=False)
             client_thread.start()   
             print("="*50)
         except KeyboardInterrupt: # When Ctrl + C is pressed, close the connection from web client to proxy server and exit
             print("Exiting program...")
             break
     tcpSerSock.close()
+
+    print("Active threads:", threading.active_count());
     
 main()
