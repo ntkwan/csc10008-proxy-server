@@ -17,10 +17,7 @@ def is_whitelisted(host_name):
     return any(site in host_name for site in white_list)
 
 def is_image_request(url):
-    for ex in image_extensions:
-        if ex in url:
-            return True
-    return False
+    return any(ex in url for ex in image_extensions)
 
 def get_server_info(request):
     try:
@@ -57,7 +54,7 @@ def handle_client(client_socket):
             for ex in image_extensions:
                 if ex in url:
                     img_ext = ex
-            file_name = "cache/" + host_name.replace(".", "dot=") + path.split(img_ext)[0].replace("?","qm=").replace("/","sla=").replace(".", "dot=") + img_ext
+            file_name = "cache/" + host_name.replace(".", "dot=") + path.split(img_ext)[0].replace("?","qm=").replace("/","sla=").replace(".", "dot=").replace("#","sharp=") + img_ext
             response = b"HTTP/1.1 200 OK\r\nCache-Control: no-store\r\n\r\n" 
             client_socket.sendall(response)
             
@@ -172,8 +169,8 @@ def get_image_data_response(host_name, request):
     if get_status(server_response) in error_codes:
         return b''
     
-    # If the image response is not error code, check chunk and return the image data
-    if "transfer-encoding: chunked" in server_response.split(b"\r\n\r\n")[0].decode().lower():
+    # If the image response is not error code
+    if "transfer-encoding: chunked" in server_response.split(b"\r\n\r\n")[0].decode().lower(): # If the image response is chunked encoding, get the image data from the chunks
         image_data = b""
         chunk_data = server_response.split(b"\r\n\r\n")[1]
         chunks = chunk_data.split(b"\r\n")
@@ -181,7 +178,7 @@ def get_image_data_response(host_name, request):
             if i % 2 == 1:
                 image_data += chunks[i]
     else:
-        image_data = server_response.split(b"\r\n\r\n")[1]
+        image_data = server_response.split(b"\r\n\r\n")[1] # If the image response is not chunked encoding, get the image data from the body part
     return image_data
 
 def cache_image(host_name, image_data, url):
@@ -190,7 +187,7 @@ def cache_image(host_name, image_data, url):
     for ex in image_extensions:
         if ex in url:
             img_ext = ex
-    file_name = "cache/" + host_name.replace(".", "dot=") + path.split(img_ext)[0].replace("?","qm=").replace("/","sla=").replace(".", "dot=") + img_ext
+    file_name = "cache/" + host_name.replace(".", "dot=") + path.split(img_ext)[0].replace("?","qm=").replace("/","sla=").replace(".", "dot=").replace("#","sharp=") + img_ext
     # Save the image data to cache by the following file name in folder cache
     open(file_name, 'wb').write(image_data)
     # Update the cache time of the image
@@ -213,7 +210,7 @@ def cache_clean():
         print("="*50)
 
 def recache_image(file):
-    file = file.replace("qm=","?").replace("dot=",".").replace("sla=","/")
+    file = file.replace("qm=","?").replace("dot=",".").replace("sla=","/").replace("sharp=","#")
     host_name = file.split('/')[0]
     paths = file.split('/')[1:]
     
@@ -221,6 +218,7 @@ def recache_image(file):
     url = "http://" + host_name
     for path in paths:
         url += "/" + path
+        
     # Create the request to get the image
     request = f"GET {url} HTTP/1.1\r\nHost: {host_name}\r\n\r\n"
     # Send the request to web server and get the image data
