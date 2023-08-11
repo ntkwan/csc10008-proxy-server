@@ -17,8 +17,10 @@ def is_whitelisted(host_name):
     return any(site in host_name for site in white_list)
 
 def is_image_request(url):
-    image_extensions = [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico"]
-    return any(url.endswith(ex) for ex in image_extensions)
+    for ex in image_extensions:
+        if ex in url:
+            return True
+    return False
 
 def get_server_info(request):
     try:
@@ -31,7 +33,7 @@ def get_server_info(request):
         return None, None, None
 
 def error_response():
-    return b"HTTP/1.1 403 Forbidden\r\n\r\n" + open('./forbidden_page.html', 'rb').read();
+    return b"HTTP/1.1 403 Forbidden\r\n\r\n" + open('./forbidden_page.html', 'rb').read()
 
 def handle_client(client_socket):
     try:
@@ -51,7 +53,11 @@ def handle_client(client_socket):
         # If the request is image request, check the cache
         if is_image_request(url):
             path = url.split(host_name)[1]
-            file_name = "cache/" + host_name.replace(".", "_") + path.replace("/","-")
+            img_ext = ""
+            for ex in image_extensions:
+                if ex in url:
+                    img_ext = ex
+            file_name = "cache/" + host_name.replace(".", "dot=") + path.split(img_ext)[0].replace("?","qm=").replace("/","sla=").replace(".", "dot=") + img_ext
             response = b"HTTP/1.1 200 OK\r\nCache-Control: no-store\r\n\r\n" 
             client_socket.sendall(response)
             
@@ -166,13 +172,25 @@ def get_image_data_response(host_name, request):
     if get_status(server_response) in error_codes:
         return b''
     
-    # If the image response is not error code, return the image data
-    image_data = server_response.split(b"\r\n\r\n")[1]
+    # If the image response is not error code, check chunk and return the image data
+    if "transfer-encoding: chunked" in server_response.split(b"\r\n\r\n")[0].decode().lower():
+        image_data = b""
+        chunk_data = server_response.split(b"\r\n\r\n")[1]
+        chunks = chunk_data.split(b"\r\n")
+        for i in range(len(chunks)):
+            if i % 2 == 1:
+                image_data += chunks[i]
+    else:
+        image_data = server_response.split(b"\r\n\r\n")[1]
     return image_data
 
 def cache_image(host_name, image_data, url):
     path = url.split(host_name)[1]
-    file_name = "cache/" + host_name.replace(".", "_") + path.replace("/","-")
+    img_ext = ""
+    for ex in image_extensions:
+        if ex in url:
+            img_ext = ex
+    file_name = "cache/" + host_name.replace(".", "dot=") + path.split(img_ext)[0].replace("?","qm=").replace("/","sla=").replace(".", "dot=") + img_ext
     # Save the image data to cache by the following file name in folder cache
     open(file_name, 'wb').write(image_data)
     # Update the cache time of the image
@@ -195,14 +213,14 @@ def cache_clean():
         print("="*50)
 
 def recache_image(file):
-    host_name = file.split('-')[0].replace("_",".")
-    paths = file.split('-')[1:]
+    file = file.replace("qm=","?").replace("dot=",".").replace("sla=","/")
+    host_name = file.split('/')[0]
+    paths = file.split('/')[1:]
     
     # Create the url to get the image
     url = "http://" + host_name
     for path in paths:
         url += "/" + path
-    
     # Create the request to get the image
     request = f"GET {url} HTTP/1.1\r\nHost: {host_name}\r\n\r\n"
     # Send the request to web server and get the image data
@@ -228,6 +246,7 @@ def get_config():
 CACHE_TIME, WHITE_LIST, TIME_LIMIT = get_config()
 WEB_CLIENT = 5
 error_codes = [b'405', b'404', b'403', b'401', b'400', b'408', b'500', b'502', b'503']
+image_extensions = [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico"]
 images_cache_time = {}
 
 def main():     
@@ -257,7 +276,7 @@ def main():
     # Main thread
     while True:
         try:
-            print("Active threads:", threading.active_count());
+            print("Active threads:", threading.active_count())
             # Start receiving data from the web client
             print('Ready to serve...')
             tcpCliSock, addr = tcpSerSock.accept() 
@@ -271,6 +290,6 @@ def main():
             break
     tcpSerSock.close()
 
-    print("Active threads:", threading.active_count());
+    print("Active threads:", threading.active_count())
     
 main()
