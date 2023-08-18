@@ -6,7 +6,7 @@ import sys
 import os
 
 def is_in_access_time():
-    now = datetime.datetime.now()
+    now = datetime.datetime.now() # Get the current time
     access_start = now.replace(hour=TIME_LIMIT[0],minute=0,second=0,microsecond=0)
     access_end = now.replace(hour=TIME_LIMIT[1],minute=0,second=0,microsecond=0)
     return access_start <= now <= access_end
@@ -21,7 +21,7 @@ def is_image_request(url):
 
 def get_server_info(request):
     try:
-        request_data = request.decode()
+        request_data = request.decode() # Convert the request from bytes to string
         method = request_data.split(' ')[0]
         url = request_data.split(' ')[1]
         host_name = url.split('/')[2]
@@ -90,6 +90,7 @@ def get_status(server_response):
     status = buffer.split(b' ')[1]
     return status
 
+# connection: close, the web server will close the connection after sending the response
 def get_connection_close(server_response):
     connection = "connection: close" in server_response.decode().lower()
     return connection
@@ -102,6 +103,7 @@ def get_content_length(headers):
             return int(length)
     return 0
 
+# etag: entity tag, a unique identifier for a specific version of a resource, if the etag is the same, the resource is not changed
 def get_etag(headers):
     lines = headers.split(b"\r\n")
     for line in lines:
@@ -237,11 +239,11 @@ def get_config():
     with open("config", "r") as file:
         for line in file:
             if "cache_time" in line:
-                CACHE_TIME = float(line.split('=')[1].strip())
+                CACHE_TIME = float(line.split('=')[1].strip()) # Remove backspace, split the cache time by '=' and convert the cache time to float
             elif "whitelisting" in line:
-                WHITE_LIST = line.split('=')[1].strip().split(', ')
+                WHITE_LIST = line.split('=')[1].strip().split(', ') # Remove backspace and split the white list by ', '
             else:
-                TIME_LIMIT = line.split('=')[1].strip().split('-')
+                TIME_LIMIT = line.split('=')[1].strip().split('-') # Remove backspace and split the time limit by '-'
                 TIME_LIMIT[0] = int(TIME_LIMIT[0])
                 TIME_LIMIT[1] = int(TIME_LIMIT[1])
     return CACHE_TIME, WHITE_LIST, TIME_LIMIT
@@ -260,10 +262,10 @@ def main():
         sys.exit(2)
     
     # Create a server socket, bind it to a port and start listening (allow at most WEB_CLIENT queued connections)
-    tcpSerSock = socket(AF_INET, SOCK_STREAM)
-    tcpSerSock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
-    tcpSerSock.bind((sys.argv[1], 8888))
-    tcpSerSock.listen(WEB_CLIENT)
+    tcpSerSock = socket(AF_INET, SOCK_STREAM) # AF_INET: IPv4, SOCK_STREAM: TCP (Transport layer protocol)
+    tcpSerSock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1) # SOL_SOCKET is the socket layer itself, SO_REUSEADDR is to reuse the socket address (IP of proxy server)
+    tcpSerSock.bind((sys.argv[1], 8888)) # Input the IP of proxy server and port number 8888
+    tcpSerSock.listen(WEB_CLIENT) # Allow at most WEB_CLIENT queued connections
     print('Proxy server is ready to receive connections...')
 
     # Create cache folder if not exists
@@ -283,7 +285,7 @@ def main():
             print("Active threads:", threading.active_count())
             # Start receiving data from the web client
             print('Ready to serve...')
-            tcpCliSock, addr = tcpSerSock.accept() 
+            tcpCliSock, addr = tcpSerSock.accept() # Accept a connection from web client
             print('Received a connection from:', addr)
             # Start a thread to handle mutiple requests from web client
             client_thread = threading.Thread(target=handle_client, args=(tcpCliSock,), daemon=False)
