@@ -36,12 +36,12 @@ def handle_client(client_socket):
     try:
         request = client_socket.recv(4096) # Get the header of the request
         method, url, host_name = get_server_info(request) # Get the request information
-    
+
         # If the request is from invalid connection, close the connection
         print('Try to connect to', url)
         if method == None:
             return (print('Failed to connect!'), client_socket.close())
-        
+
         # If the request is not in access time or not in whitelist or not [GET, POS, HEAD] request, return 403 Forbidden
         if not is_in_access_time() or not is_whitelisted(host_name) or method not in ['GET', 'POST', 'HEAD']:
             client_socket.sendall(error_response())
@@ -70,7 +70,12 @@ def handle_client(client_socket):
                     client_socket.sendall(image_data)
                     
             return (client_socket.close())
-            
+
+        # If the request is website homepage, add '/' to the method        
+        if (url[len(url) - 1] == url[5]):
+            lines = request.decode().split(url)
+            request = lines[0] + url[5] + lines[1]
+            request = request.encode()
 
         # If the request is not image request, get the response from server and return it to client
         server_response = get_server_response(host_name, request)
@@ -113,6 +118,7 @@ def get_server_response(host_name, request):
     
     # Get the response from web server
     server_response = server_socket.recv(1024)
+
     # If the response is error code, return 403 Forbidden
     status = get_status(server_response)
     if status == b"100": # If the response is 100 continue, get the next response
